@@ -1,0 +1,244 @@
+import pandas as pd
+
+import numpy as np
+
+from datetime import date
+
+dfoff=pd.read_csv('ccf_offline_stage1_train.csv')
+
+dftest=pd.read_csv('ccf_offline_stage1_test_revised.csv')
+
+dfoff=dfoff[dfoff['Date_received']>0]
+
+print(dfoff.info())
+
+print(dfoff['Discount_rate'])
+
+dfoff['Discount_rate']=dfoff['Discount_rate'].fillna(0)
+
+
+#折扣率
+
+def discount_rate(row):
+
+    if row == 0:
+
+        return 1
+
+    elif ':' in row :
+
+        rows=row.split(':')
+        
+        return 1-(float(rows[1])/float(rows[0]))
+
+    else:
+
+        return row
+
+
+dfoff['discount_rate']=dfoff['Discount_rate'].apply(discount_rate).astype(float)
+
+dftest['discount_rate']=dftest['Discount_rate'].apply(discount_rate).astype(float)
+
+#时间是否周末
+
+date_received_dt = pd.to_datetime(dfoff['Date_received'], format='%Y%m%d')
+
+date_received_dt1 = pd.to_datetime(dftest['Date_received'], format='%Y%m%d')
+
+def weekday(row):
+
+    rows=row.weekday()+1
+
+    return rows
+
+weekday=date_received_dt.apply(weekday)
+
+print(weekday)
+
+
+
+def weekday1(row):
+
+    rows=row.weekday()+1
+
+    return rows
+
+weekday1=date_received_dt1.apply(weekday1)
+
+print(weekday1)
+
+
+
+dfoff['weekday']=weekday
+
+dftest['weekday']=weekday1
+
+
+
+def weekdaynot(row):
+
+    if row>5:
+
+        return 1
+
+    else:
+
+        return 0
+
+dfoff['weekdaynot']=dfoff['weekday'].apply(weekdaynot)
+
+dftest['weekdaynot']=dftest['weekday'].apply(weekdaynot)
+
+print(dfoff['weekdaynot'])
+
+date_dt = pd.to_datetime(dfoff['Date'], format='%Y%m%d')
+
+print(date_dt)
+
+td=date_dt-date_received_dt
+
+
+#标记目标
+
+def label(row):
+
+    if row<pd.Timedelta(15,'d'):
+
+        return 1
+
+    else:
+
+        return 0
+
+dfoff['label']=td.apply(label)
+
+print(dfoff['label'])
+
+
+#用户特征
+
+u=dfoff[['User_id']].copy()
+
+u['u1']=1
+
+u=u.groupby('User_id').count()
+
+dfoff=pd.merge(dfoff,u,on='User_id')
+
+#商家特征
+
+um=dfoff[['Merchant_id']].copy()
+
+um['u2']=1
+
+um=um.groupby('Merchant_id').count()
+
+dfoff=pd.merge(dfoff,um,on='Merchant_id')
+
+
+#用户商家特征
+
+umn=dfoff[['User_id','Merchant_id']].copy()
+
+umn['u3']=1
+
+umn=umn.groupby(['User_id','Merchant_id']).count()
+
+dfoff=pd.merge(dfoff,umn,on=['User_id','Merchant_id']).fillna(0)
+
+
+ut=u=dftest[['User_id']].copy()
+
+ut['u1']=1
+
+ut=ut.groupby('User_id').count()
+
+dftest=pd.merge(dftest,ut,on='User_id')
+
+
+umt=dftest[['Merchant_id']].copy()
+
+umt['u2']=1
+
+umt=umt.groupby('Merchant_id').count()
+
+dftest=pd.merge(dftest,umt,on='Merchant_id')
+
+
+
+umnt=dftest[['User_id','Merchant_id']].copy()
+
+umnt['u3']=1
+
+umnt=umnt.groupby(['User_id','Merchant_id']).count()
+
+dftest=pd.merge(dftest,umnt,on=['User_id','Merchant_id']).fillna(0)
+
+
+
+
+#数据拆封
+
+x= dfoff[['discount_rate','weekday','weekdaynot','u1','u2','u3']]
+
+print(x)
+
+y=dfoff['label']
+
+print(y)
+
+
+dfoff['discount_rate']=dfoff['discount_rate'].astype(float)
+
+dfoff['weekday']=dfoff['weekday'].astype(str)
+
+dfoff['weekdaynot']=dfoff['weekdaynot'].astype(str)
+
+
+dftest['discount_rate']=dftest['discount_rate'].astype(float)
+
+dftest['weekday']=dftest['weekday'].astype(str)
+
+dftest['weekdaynot']=dftest['weekdaynot'].astype(str)
+
+
+z=pd.get_dummies( dfoff[['discount_rate','weekday','weekdaynot','u1','u2','u3']])
+
+p=pd.get_dummies( dftest[['discount_rate','weekday','weekdaynot','u1','u2','u3']])
+
+#机器学习过程
+
+from sklearn.model_selection import train_test_split
+
+from sklearn.ensemble import GradientBoostingClassifier
+
+from sklearn.metrics import accuracy_score,roc_auc_score
+
+x_train,x_test,y_train,y_test=train_test_split(z,y,test_size=0.3)
+
+model=GradientBoostingClassifier().fit(x_train,y_train)
+
+y_p=model.predict(x_test)
+
+print(y_p)
+
+print(roc_auc_score(y_test,y_p))
+
+decision_scores = model.decision_function(x_test)
+
+print(roc_auc_score(y_test, decision_scores))
+
+print(accuracy_score(y_test,y_p))
+
+y_pt=model.predict_proba(p)
+
+print(y_pt)
+
+submit = dftest[['User_id','Coupon_id','Date_received']].copy()
+
+submit['label'] = y_pt[:,1]
+
+submit.to_csv('submit2.csv', index=False, header=False)
+
+submit.head()
